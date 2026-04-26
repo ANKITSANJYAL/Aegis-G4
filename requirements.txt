@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Aegis-G4 Requirements
+# Production-grade AI safety-audited healthcare agent
+# Python 3.11+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Core AI Framework ────────────────────────────────────────────────────────
+langgraph>=0.2.0
+langchain-core>=0.3.0
+
+# ── Data Validation ──────────────────────────────────────────────────────────
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# ── Vector Database (Policy RAG) ─────────────────────────────────────────────
+chromadb>=0.5.0
+
+# ── Embeddings ───────────────────────────────────────────────────────────────
+sentence-transformers>=3.0.0
+
+# ── Async HTTP (vLLM client) ─────────────────────────────────────────────────
+aiohttp>=3.9.0
+
+# ── Structured Logging ───────────────────────────────────────────────────────
+structlog>=24.1.0
+
+# ── Model Serving (Kaggle / Production) ──────────────────────────────────────
+# vLLM — GPU inference server for Gemma 4 31B and E4B
+# Install separately (requires CUDA): pip install vllm
+# vllm>=0.5.0
+
+# Google AI Edge LiteRT — on-device inference for Gemma 4 E4B
+# Install separately: pip install ai-edge-litert
+# ai-edge-litert>=1.0.0
+
+# ── Data Science (Kaggle notebook) ───────────────────────────────────────────
+numpy>=1.26.0
+pandas>=2.2.0
+matplotlib>=3.8.0
+ipywidgets>=8.0.0
+
+# ── Dev / Testing ────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+black>=24.0.0
+ruff>=0.4.0
+mypy>=1.10.0
