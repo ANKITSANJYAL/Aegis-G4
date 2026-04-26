@@ -28,14 +28,20 @@ _log = structlog.get_logger(__name__)
 
 
 async def wait_for_vllm(
-    urls: list[str],
+    server_urls: list[str],
     timeout_seconds: int = 600,
     poll_interval: int = 10,
 ) -> None:
     """
-    Poll each vLLM /health endpoint until all are ready or timeout is reached.
-    Call this before run_aegis in vllm mode — server startup takes 3-8 minutes
-    for large models on Kaggle T4s.
+    Poll each vLLM /health endpoint until all servers respond 200 or timeout.
+
+    Args:
+        server_urls: Base server URLs WITHOUT a path suffix, e.g.
+                     ["http://localhost:8000", "http://localhost:8001"].
+                     The /v1 path is only for inference calls; the health
+                     endpoint lives at the root: GET /health.
+        timeout_seconds: Give up after this many seconds (default 600 = 10 min).
+        poll_interval: Seconds between polls.
     """
     try:
         import aiohttp
@@ -44,7 +50,7 @@ async def wait_for_vllm(
         return
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
-    pending = set(urls)
+    pending = set(server_urls)
 
     async with aiohttp.ClientSession() as session:
         while pending:
@@ -54,12 +60,19 @@ async def wait_for_vllm(
                 )
             for url in list(pending):
                 with contextlib.suppress(Exception):
-                    async with session.get(f"{url}/health", timeout=aiohttp.ClientTimeout(total=5)) as r:
+                    async with session.get(
+                        f"{url}/health",
+                        timeout=aiohttp.ClientTimeout(total=5),
+                    ) as r:
                         if r.status == 200:
                             _log.info("vllm_server_ready", url=url)
                             pending.discard(url)
             if pending:
-                _log.info("waiting_for_vllm_servers", remaining=list(pending), poll_interval=poll_interval)
+                _log.info(
+                    "waiting_for_vllm_servers",
+                    remaining=list(pending),
+                    poll_interval=poll_interval,
+                )
                 await asyncio.sleep(poll_interval)
 
 structlog.configure(
@@ -167,7 +180,7 @@ def _print_result(state: dict) -> None:
         print(f"  Confidence       : {cert.auditor_confidence:.0%}")
         print(f"  RAG Policies     : {cert.rag_documents_retrieved}")
         print(f"  Violations       : {len(cert.violations)}")
-        summary = cert.summary[:117] + "..." if len(cert.summary) > 120 else cert.summary
+        summary = f"{cert.summary[:117]}..." if len(cert.summary) > 120 else cert.summary
         print(f"  Summary          : {summary}")
 
         if cert.violations:
@@ -236,7 +249,7 @@ async def main(mode: str, scenario_ids: list[int]) -> None:
     if mode == "vllm":
         print("\n  Waiting for vLLM servers to be ready ...")
         await wait_for_vllm(
-            urls=["http://localhost:8000/v1", "http://localhost:8001/v1"],
+            server_urls=["http://localhost:8000", "http://localhost:8001"],
             timeout_seconds=600,
             poll_interval=10,
         )

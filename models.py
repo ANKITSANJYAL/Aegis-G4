@@ -1,15 +1,25 @@
 """
 models.py — Aegis-G4
-Async model client wrappers for Gemma 4 31B (Orchestrator) and
-Gemma 4 E4B (Auditor) via vLLM's OpenAI-compatible API.
+Async model client wrappers for the Orchestrator and Auditor models
+via vLLM's OpenAI-compatible API.
 
-On Kaggle 2xT4:
-  - gemma-4-31b-it  → vLLM tensor_parallel_size=2
-  - gemma-4-e4b-it  → vLLM tensor_parallel_size=1 (fits on 1 T4)
+Model selection (override via environment variables):
+  AEGIS_ORCHESTRATOR_MODEL  — default: google/gemma-4-e4b-it
+  AEGIS_AUDITOR_MODEL       — default: google/gemma-4-e4b-it
+
+Memory guide for vLLM:
+  gemma-4-e4b-it  ~8 GB float16  — fits on a single T4 (14.5 GB)
+  gemma-4-12b-it  ~24 GB float16 — requires 2xT4 (tensor_parallel_size=2)
+  gemma-4-31b-it  ~62 GB float16 — requires 4xA100 or larger; does NOT
+                                    fit on 2xT4 even with tensor parallelism
+
+Recommended Kaggle 2xT4 setup (one model per GPU):
+  CUDA_VISIBLE_DEVICES=0 vllm serve $AEGIS_ORCHESTRATOR_MODEL --port 8000
+  CUDA_VISIBLE_DEVICES=1 vllm serve $AEGIS_AUDITOR_MODEL --port 8001
 
 Locally (dev/test):
-  - Both models fall back to a deterministic MockModelClient so the
-    graph can run end-to-end without GPU hardware.
+  Both models fall back to a deterministic MockModelClient so the
+  graph runs end-to-end without GPU hardware.
 """
 
 from __future__ import annotations
@@ -403,6 +413,10 @@ class MockAuditorClient(BaseModelClient):
 # Client Factory
 # ─────────────────────────────────────────────────────────────────────────────
 
+_ORCHESTRATOR_MODEL = os.getenv("AEGIS_ORCHESTRATOR_MODEL", "google/gemma-4-e4b-it")
+_AUDITOR_MODEL = os.getenv("AEGIS_AUDITOR_MODEL", "google/gemma-4-e4b-it")
+
+
 def create_orchestrator_client(
     mode: str = "mock",
     vllm_base_url: str = "http://localhost:8000/v1",
@@ -416,7 +430,7 @@ def create_orchestrator_client(
     """
     if mode == "vllm":
         return VLLMModelClient(
-            model_id="google/gemma-4-31b-it",
+            model_id=_ORCHESTRATOR_MODEL,
             base_url=vllm_base_url,
         )
     return MockOrchestratorClient()
@@ -432,12 +446,12 @@ def create_auditor_client(
 
     Args:
         mode: "vllm" | "litert" | "mock"
-        vllm_base_url: Base URL of the vLLM server for E4B (for mode="vllm")
+        vllm_base_url: Base URL of the vLLM server (for mode="vllm")
         litert_model_path: Path to the LiteRT model file (for mode="litert")
     """
     if mode == "vllm":
         return VLLMModelClient(
-            model_id="google/gemma-4-e4b-it",
+            model_id=_AUDITOR_MODEL,
             base_url=vllm_base_url,
         )
     if mode == "litert":
