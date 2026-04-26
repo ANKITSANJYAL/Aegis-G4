@@ -516,14 +516,21 @@ class AegisGraphNodes:
         log = logger.bind(node="escalation", session_id=state.get("session_id"))
         log.error("escalation_node_triggered — circuit breaker open")
 
-        proposal: OrchestratorProposal = state["orchestrator_proposal"]
+        proposal: OrchestratorProposal | None = state.get("orchestrator_proposal")
         cb: CircuitBreakerState = state.get("circuit_breaker", CircuitBreakerState())
+
+        patient_id = (
+            proposal.patient_context.patient_id
+            if proposal
+            else state["patient_context"].patient_id
+        )
+        proposal_id = proposal.proposal_id if proposal else "NO-PROPOSAL"
 
         escalation_call = MCPToolCall(
             tool_name="flag_for_human_review",
             arguments={
-                "patient_id": proposal.patient_context.patient_id,
-                "proposal_id": proposal.proposal_id,
+                "patient_id": patient_id,
+                "proposal_id": proposal_id,
                 "reason": (
                     f"Circuit breaker opened after {cb.rejection_count} consecutive "
                     f"auditor rejections. Reasons: {'; '.join(cb.rejection_reasons[-3:])}"
@@ -564,15 +571,27 @@ class AegisGraphNodes:
         log = logger.bind(node="human_review", session_id=state.get("session_id"))
         log.info("human_review_node_triggered")
 
-        proposal: OrchestratorProposal = state["orchestrator_proposal"]
+        proposal: OrchestratorProposal | None = state.get("orchestrator_proposal")
         cert: TransparencyCertificate | None = state.get("transparency_certificate")
+
+        patient_id = (
+            proposal.patient_context.patient_id
+            if proposal
+            else state["patient_context"].patient_id
+        )
+        proposal_id = proposal.proposal_id if proposal else "NO-PROPOSAL"
+        reason = (
+            cert.summary
+            if cert
+            else "Orchestrator failed to produce a proposal. Manual review required."
+        )
 
         review_call = MCPToolCall(
             tool_name="flag_for_human_review",
             arguments={
-                "patient_id": proposal.patient_context.patient_id,
-                "proposal_id": proposal.proposal_id,
-                "reason": cert.summary if cert else "Auditor requested human review.",
+                "patient_id": patient_id,
+                "proposal_id": proposal_id,
+                "reason": reason,
                 "urgency": "WITHIN_4_HOURS",
             },
         )

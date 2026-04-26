@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 from datetime import datetime, timezone
 
 import structlog
@@ -22,6 +23,44 @@ import structlog.stdlib
 
 from graph import run_aegis
 from schema import AuditorVerdict, ExecutionStatus, PatientContext
+
+_log = structlog.get_logger(__name__)
+
+
+async def wait_for_vllm(
+    urls: list[str],
+    timeout_seconds: int = 600,
+    poll_interval: int = 10,
+) -> None:
+    """
+    Poll each vLLM /health endpoint until all are ready or timeout is reached.
+    Call this before run_aegis in vllm mode — server startup takes 3-8 minutes
+    for large models on Kaggle T4s.
+    """
+    try:
+        import aiohttp
+    except ImportError:
+        _log.warning("aiohttp not installed — skipping vLLM health check")
+        return
+
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    pending = set(urls)
+
+    async with aiohttp.ClientSession() as session:
+        while pending:
+            if asyncio.get_running_loop().time() > deadline:
+                raise TimeoutError(
+                    f"vLLM servers not ready after {timeout_seconds}s: {pending}"
+                )
+            for url in list(pending):
+                with contextlib.suppress(Exception):
+                    async with session.get(f"{url}/health", timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        if r.status == 200:
+                            _log.info("vllm_server_ready", url=url)
+                            pending.discard(url)
+            if pending:
+                _log.info("waiting_for_vllm_servers", remaining=list(pending), poll_interval=poll_interval)
+                await asyncio.sleep(poll_interval)
 
 structlog.configure(
     processors=[
@@ -128,29 +167,26 @@ def _print_result(state: dict) -> None:
         print(f"  Confidence       : {cert.auditor_confidence:.0%}")
         print(f"  RAG Policies     : {cert.rag_documents_retrieved}")
         print(f"  Violations       : {len(cert.violations)}")
-        summary = cert.summary
-        if len(summary) > 120:
-            summary = summary[:117] + "..."
+        summary = cert.summary[:117] + "..." if len(cert.summary) > 120 else cert.summary
         print(f"  Summary          : {summary}")
 
         if cert.violations:
-            print(f"\n  Policy Violations:")
+            print("\n  Policy Violations:")
             for v in cert.violations:
                 print(f"    [{v.policy_id}] {v.policy_title}")
                 print(f"      Detail : {v.violation_detail}")
                 if v.remediation_suggestion:
                     print(f"      Action : {v.remediation_suggestion}")
 
-    tool_result = state.get("tool_result")
-    if tool_result:
-        print(f"\n  Tool Execution:")
+    if tool_result := state.get("tool_result"):
+        print("\n  Tool Execution:")
         print(f"    Tool    : {tool_result.tool_name}")
         print(f"    Success : {tool_result.success}")
         if tool_result.result:
-            order_id = tool_result.result.get("order_id") or tool_result.result.get(
-                "escalation_ticket_id"
-            )
-            if order_id:
+            if order_id := (
+                tool_result.result.get("order_id")
+                or tool_result.result.get("escalation_ticket_id")
+            ):
                 print(f"    Order   : {order_id}")
         if tool_result.error:
             print(f"    Error   : {tool_result.error}")
@@ -196,6 +232,14 @@ async def main(mode: str, scenario_ids: list[int]) -> None:
     print(f"  Mode     : {mode.upper()}")
     print(f"  Scenarios: {scenario_ids}")
     print(f"  Started  : {datetime.now(timezone.utc).isoformat()}")
+
+    if mode == "vllm":
+        print("\n  Waiting for vLLM servers to be ready ...")
+        await wait_for_vllm(
+            urls=["http://localhost:8000/v1", "http://localhost:8001/v1"],
+            timeout_seconds=600,
+            poll_interval=10,
+        )
 
     for scenario in SCENARIOS:
         if scenario["id"] in scenario_ids:
